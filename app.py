@@ -18,7 +18,8 @@ EXCEL_FILE_PATH = 'nyse_trading_units.xls'
 def load_symbols(file_path):
     try:
         df = pd.read_excel(file_path, engine='xlrd')
-        # Assuming the Excel columns are: Company Name, Symbol, Txn Code, Y/N, Tape
+        # Verify the sheet name if necessary
+        # df = pd.read_excel(file_path, engine='xlrd', sheet_name='YourSheetName')
         # Rename columns for consistency
         df.columns = ['Company Name', 'Symbol', 'Txn Code', 'Y/N', 'Tape']
         # Drop rows where Symbol is NaN
@@ -27,8 +28,14 @@ def load_symbols(file_path):
         symbols = df.to_dict(orient='records')
         app.logger.info(f"Loaded {len(symbols)} symbols from {file_path}.")
         return symbols
+    except FileNotFoundError:
+        app.logger.error(f"Excel file '{file_path}' not found.")
+        return []
+    except pd.errors.ParserError as e:
+        app.logger.error(f"ParserError while reading '{file_path}': {str(e)}")
+        return []
     except Exception as e:
-        app.logger.error(f"Error loading symbols from {file_path}: {str(e)}")
+        app.logger.error(f"Error loading symbols from '{file_path}': {str(e)}")
         return []
 
 # Load symbols at startup
