@@ -7,6 +7,8 @@ import json
 import os
 import logging
 import time
+import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS to allow requests from the frontend
@@ -20,6 +22,32 @@ CACHE_FILE = 'stock_data.json'
 
 # Global stock data list
 stock_data = []
+
+def fetch_nyse_tickers():
+    """
+    Scrape NYSE tickers from Wikipedia.
+    """
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"  # Example source
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        table = soup.find('table', {'id': 'constituents'})
+        nyse_tickers = []
+        if table:
+            rows = table.find_all('tr')[1:]  # Skip header
+            for row in rows:
+                cols = row.find_all('td')
+                symbol = cols[0].text.strip().replace('.', '-')
+                name = cols[1].text.strip()
+                nyse_tickers.append({"symbol": symbol, "name": name})
+            logger.info(f"Scraped {len(nyse_tickers)} NYSE tickers from Wikipedia.")
+        else:
+            logger.warning("Could not find the NYSE tickers table on Wikipedia.")
+        return nyse_tickers
+    except Exception as e:
+        logger.error(f"Error scraping NYSE tickers: {e}")
+        return []
 
 def load_stock_data():
     """
@@ -45,10 +73,10 @@ def fetch_and_cache_stock_data():
     """
     exchanges = {
         'NASDAQ': si.tickers_nasdaq(),
-        'NYSE': si.tickers_nyse(),
         'AMEX': si.tickers_amex(),
         'SP500': si.tickers_sp500(),
         'DOW': si.tickers_dow(),
+        # 'NYSE': si.tickers_nyse(),  # Removed due to AttributeError
         # Add more exchanges if needed
     }
 
@@ -59,7 +87,12 @@ def fetch_and_cache_stock_data():
         all_symbols.update(symbols)
         time.sleep(1)  # Sleep to avoid hitting rate limits
 
-    logger.info(f"Total unique symbols fetched: {len(all_symbols)}")
+    # Fetch NYSE tickers via scraping
+    nyse_tickers = fetch_nyse_tickers()
+    for stock in nyse_tickers:
+        all_symbols.add(stock['symbol'])
+
+    logger.info(f"Total unique symbols fetched (including NYSE): {len(all_symbols)}")
 
     stock_list = []
     lock = threading.Lock()
