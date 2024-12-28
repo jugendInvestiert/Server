@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify
 import yfinance as yf
 from flask_cors import CORS
-import json
+import pandas as pd
 import logging
+import os
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -10,14 +11,28 @@ CORS(app)  # Enable CORS for all routes
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Load symbols data from symbols.json
-try:
-    with open('symbols.json', 'r') as f:
-        SYMBOLS = json.load(f)
-    app.logger.info("Loaded symbols.json successfully.")
-except Exception as e:
-    app.logger.error(f"Error loading symbols.json: {str(e)}")
-    SYMBOLS = []
+# Path to the NYSE Trading Units Excel file
+EXCEL_FILE_PATH = 'nyse_trading_units.xls'
+
+# Load symbols data from the Excel file
+def load_symbols(file_path):
+    try:
+        df = pd.read_excel(file_path, engine='xlrd')
+        # Assuming the Excel columns are: Company Name, Symbol, Txn Code, Y/N, Tape
+        # Rename columns for consistency
+        df.columns = ['Company Name', 'Symbol', 'Txn Code', 'Y/N', 'Tape']
+        # Drop rows where Symbol is NaN
+        df = df.dropna(subset=['Symbol'])
+        # Convert to list of dictionaries
+        symbols = df.to_dict(orient='records')
+        app.logger.info(f"Loaded {len(symbols)} symbols from {file_path}.")
+        return symbols
+    except Exception as e:
+        app.logger.error(f"Error loading symbols from {file_path}: {str(e)}")
+        return []
+
+# Load symbols at startup
+SYMBOLS = load_symbols(EXCEL_FILE_PATH)
 
 @app.route('/api/stock', methods=['GET'])
 def get_stock_price():
@@ -54,20 +69,24 @@ def search_symbols():
         return jsonify({'error': 'No query provided'}), 400
 
     try:
-        # Simple search: symbols or names containing the query
-        results = [
+        # Find symbols where the query is a substring of the Symbol or Company Name
+        matched_symbols = [
             symbol for symbol in SYMBOLS
-            if query in symbol['symbol'].lower() or query in symbol['name'].lower()
+            if query in symbol['Symbol'].lower() or query in symbol['Company Name'].lower()
         ]
 
-        # Limit the number of suggestions to prevent overwhelming the frontend
-        limited_results = results[:10]
+        # Limit to top 10 matches
+        top_matches = matched_symbols[:10]
 
-        app.logger.info(f"Search query '{query}' returned {len(limited_results)} suggestions.")
-        return jsonify({'suggestions': limited_results})
+        app.logger.info(f"Search query '{query}' returned {len(top_matches)} suggestions.")
+        return jsonify({'suggestions': top_matches})
     except Exception as e:
         app.logger.error(f"Error in search_symbols: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Ensure the Excel file exists
+    if not os.path.exists(EXCEL_FILE_PATH):
+        app.logger.error(f"Excel file '{EXCEL_FILE_PATH}' not found.")
+    else:
+        app.run(debug=True)
