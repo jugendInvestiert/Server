@@ -8,11 +8,16 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
-# Load symbols data
-with open('symbols.json', 'r') as f:
-    SYMBOLS = json.load(f)
+# Load symbols data from symbols.json
+try:
+    with open('symbols.json', 'r') as f:
+        SYMBOLS = json.load(f)
+    app.logger.info("Loaded symbols.json successfully.")
+except Exception as e:
+    app.logger.error(f"Error loading symbols.json: {str(e)}")
+    SYMBOLS = []
 
 @app.route('/api/stock', methods=['GET'])
 def get_stock_price():
@@ -35,7 +40,7 @@ def get_stock_price():
             'date': latest.name.strftime('%Y-%m-%d'),
             'time': latest.name.strftime('%H:%M:%S')
         }
-        app.logger.debug(f"Fetched stock price for {symbol}: {response}")
+        app.logger.info(f"Fetched stock price for {symbol}: {response}")
         return jsonify(response)
     except Exception as e:
         app.logger.error(f"Error fetching stock price: {str(e)}")
@@ -43,20 +48,23 @@ def get_stock_price():
 
 @app.route('/api/search', methods=['GET'])
 def search_symbols():
-    query = request.args.get('q')
+    query = request.args.get('q', '').strip().lower()
     if not query:
         app.logger.debug("No query provided for search.")
         return jsonify({'error': 'No query provided'}), 400
 
     try:
-        query_lower = query.lower()
         # Simple search: symbols or names containing the query
-        results = [symbol for symbol in SYMBOLS if query_lower in symbol['symbol'].lower() or query_lower in symbol['name'].lower()]
-        # Limit the number of suggestions
-        results = results[:10]
+        results = [
+            symbol for symbol in SYMBOLS
+            if query in symbol['symbol'].lower() or query in symbol['name'].lower()
+        ]
 
-        app.logger.debug(f"Returning {len(results)} suggestions for query: {query}")
-        return jsonify({'suggestions': results})
+        # Limit the number of suggestions to prevent overwhelming the frontend
+        limited_results = results[:10]
+
+        app.logger.info(f"Search query '{query}' returned {len(limited_results)} suggestions.")
+        return jsonify({'suggestions': limited_results})
     except Exception as e:
         app.logger.error(f"Error in search_symbols: {str(e)}")
         return jsonify({'error': str(e)}), 500
