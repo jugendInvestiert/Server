@@ -2,3 +2,7 @@ flask
 yfinance
 flask-cors
 gunicorn
+Flask
+Flask-CORS
+yfinance
+yahoo_fin
