@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
-import yfinance as yf
 from flask_cors import CORS
+import yfinance as yf
 import pandas as pd
 import logging
 import os
@@ -11,15 +11,13 @@ CORS(app)  # Enable CORS for all routes
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Path to the NYSE Trading Units Excel file
-EXCEL_FILE_PATH = 'nyse_trading_units.xls'
+# Path to the NYSE Trading Units CSV file
+CSV_FILE_PATH = 'nyse_trading_units.csv'
 
-# Load symbols data from the Excel file
+# Load symbols data from the CSV file
 def load_symbols(file_path):
     try:
-        df = pd.read_excel(file_path, engine='xlrd')
-        # Verify the sheet name if necessary
-        # df = pd.read_excel(file_path, engine='xlrd', sheet_name='YourSheetName')
+        df = pd.read_csv(file_path)
         # Rename columns for consistency
         df.columns = ['Company Name', 'Symbol', 'Txn Code', 'Y/N', 'Tape']
         # Drop rows where Symbol is NaN
@@ -29,7 +27,7 @@ def load_symbols(file_path):
         app.logger.info(f"Loaded {len(symbols)} symbols from {file_path}.")
         return symbols
     except FileNotFoundError:
-        app.logger.error(f"Excel file '{file_path}' not found.")
+        app.logger.error(f"CSV file '{file_path}' not found.")
         return []
     except pd.errors.ParserError as e:
         app.logger.error(f"ParserError while reading '{file_path}': {str(e)}")
@@ -39,7 +37,7 @@ def load_symbols(file_path):
         return []
 
 # Load symbols at startup
-SYMBOLS = load_symbols(EXCEL_FILE_PATH)
+SYMBOLS = load_symbols(CSV_FILE_PATH)
 
 @app.route('/api/stock', methods=['GET'])
 def get_stock_price():
@@ -58,7 +56,7 @@ def get_stock_price():
         latest = data.iloc[-1]
         response = {
             'symbol': symbol.upper(),
-            'price': round(latest['Close'], 2),
+            'price': float(round(latest['Close'], 2)),  # Ensure float type
             'date': latest.name.strftime('%Y-%m-%d'),
             'time': latest.name.strftime('%H:%M:%S')
         }
@@ -85,15 +83,19 @@ def search_symbols():
         # Limit to top 10 matches
         top_matches = matched_symbols[:10]
 
+        if not top_matches:
+            app.logger.info(f"Search query '{query}' returned no suggestions.")
+            return jsonify({'message': 'No matching symbols found.'}), 404
+
         app.logger.info(f"Search query '{query}' returned {len(top_matches)} suggestions.")
         return jsonify({'suggestions': top_matches})
     except Exception as e:
         app.logger.error(f"Error in search_symbols: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Internal server error.'}), 500
 
 if __name__ == '__main__':
-    # Ensure the Excel file exists
-    if not os.path.exists(EXCEL_FILE_PATH):
-        app.logger.error(f"Excel file '{EXCEL_FILE_PATH}' not found.")
+    # Ensure the CSV file exists
+    if not os.path.exists(CSV_FILE_PATH):
+        app.logger.error(f"CSV file '{CSV_FILE_PATH}' not found.")
     else:
         app.run(debug=True)
