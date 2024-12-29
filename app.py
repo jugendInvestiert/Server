@@ -6,27 +6,46 @@ import logging
 import os
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Path to the NYSE Trading Units CSV file
 CSV_FILE_PATH = os.getenv('CSV_FILE_PATH', 'nyse_trading_units.csv')
 
-# Load symbols data from the CSV file
 def load_symbols(file_path):
     encodings_to_try = ['utf-8', 'utf-8-sig', 'iso-8859-1', 'latin1', 'cp1252']
     for enc in encodings_to_try:
         try:
-            df = pd.read_csv(file_path, encoding=enc)
-            # Rename columns for consistency
-            df.columns = ['Company Name', 'Symbol', 'Txn Code', 'Y/N', 'Tape']
-            # Drop rows where Symbol is NaN
+            # Add specific separator and quoting parameters
+            df = pd.read_csv(
+                file_path,
+                encoding=enc,
+                sep='\t',  # Use tab as separator
+                quoting=pd.io.common.QUOTE_NONE,  # Disable quoting
+                on_bad_lines='skip'  # Skip problematic lines
+            )
+            
+            # Clean column names by stripping whitespace
+            df.columns = [col.strip() for col in df.columns]
+            
+            # Rename columns to match expected format
+            column_mapping = {
+                'Company': 'Company Name',
+                'Symbol': 'Symbol',
+                'TU/TXN': 'Txn Code',
+                'Auction': 'Y/N',
+                'Tape': 'Tape'
+            }
+            df = df.rename(columns=column_mapping)
+            
+            # Clean data
             df = df.dropna(subset=['Symbol'])
+            df['Symbol'] = df['Symbol'].str.strip()
+            df['Company Name'] = df['Company Name'].str.strip()
+            
             # Convert to list of dictionaries
             symbols = df.to_dict(orient='records')
-            app.logger.info(f"Loaded {len(symbols)} symbols from '{file_path}' using encoding '{enc}'.")
+            app.logger.info(f"Successfully loaded {len(symbols)} symbols from '{file_path}' using encoding '{enc}'.")
             return symbols
         except UnicodeDecodeError as e:
             app.logger.warning(f"UnicodeDecodeError with encoding '{enc}': {str(e)}")
@@ -34,6 +53,7 @@ def load_symbols(file_path):
             app.logger.error(f"ParserError while reading '{file_path}' with encoding '{enc}': {str(e)}")
         except Exception as e:
             app.logger.error(f"Error loading symbols from '{file_path}' with encoding '{enc}': {str(e)}")
+    
     app.logger.error(f"Failed to load symbols from '{file_path}' with attempted encodings.")
     return []
 
@@ -44,20 +64,18 @@ SYMBOLS = load_symbols(CSV_FILE_PATH)
 def get_stock_price():
     symbol = request.args.get('symbol')
     if not symbol:
-        app.logger.debug("No stock symbol provided.")
         return jsonify({'error': 'No stock symbol provided'}), 400
 
     try:
         stock = yf.Ticker(symbol)
         data = stock.history(period="1d")
         if data.empty:
-            app.logger.debug(f"Invalid stock symbol or no data found for {symbol}.")
             return jsonify({'error': 'Invalid stock symbol or no data found'}), 404
 
         latest = data.iloc[-1]
         response = {
             'symbol': symbol.upper(),
-            'price': float(round(latest['Close'], 2)),  # Ensure float type
+            'price': float(round(latest['Close'], 2)),
             'date': latest.name.strftime('%Y-%m-%d'),
             'time': latest.name.strftime('%H:%M:%S')
         }
@@ -71,7 +89,6 @@ def get_stock_price():
 def search_symbols():
     query = request.args.get('q', '').strip().lower()
     if not query:
-        app.logger.debug("No query provided for search.")
         return jsonify({'error': 'No query provided'}), 400
 
     try:
@@ -92,7 +109,6 @@ def search_symbols():
         return jsonify({'error': 'Internal server error.'}), 500
 
 if __name__ == '__main__':
-    # Ensure the CSV file exists
     if not os.path.exists(CSV_FILE_PATH):
         app.logger.error(f"CSV file '{CSV_FILE_PATH}' not found.")
     else:
