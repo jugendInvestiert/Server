@@ -5,6 +5,7 @@ import pandas as pd
 import logging
 import os
 import csv
+from difflib import SequenceMatcher
 
 app = Flask(__name__)
 CORS(app)
@@ -16,17 +17,19 @@ CSV_FILE_PATH = os.getenv('CSV_FILE_PATH', 'nyse_trading_units.csv')
 # Initialize SYMBOLS as a global variable
 SYMBOLS = []
 
+def calculate_similarity(query, text):
+    """Calculate similarity ratio between query and text"""
+    return SequenceMatcher(None, query.lower(), text.lower()).ratio()
+
 def load_symbols(file_path):
     """Load symbols from CSV file and return them"""
     encodings_to_try = ['utf-8', 'utf-8-sig', 'iso-8859-1', 'latin1', 'cp1252']
     for enc in encodings_to_try:
         try:
-            # Try to read the file first to check if it exists and is readable
             if not os.path.exists(file_path):
                 app.logger.error(f"CSV file not found at path: {file_path}")
                 return []
                 
-            # Add specific separator and quoting parameters
             df = pd.read_csv(
                 file_path,
                 encoding=enc,
@@ -36,10 +39,8 @@ def load_symbols(file_path):
                 on_bad_lines='skip'
             )
             
-            # Clean column names by stripping whitespace
             df.columns = [col.strip() for col in df.columns]
             
-            # Rename columns to match expected format
             column_mapping = {
                 'Company': 'Company Name',
                 'Symbol': 'Symbol',
@@ -49,19 +50,16 @@ def load_symbols(file_path):
             }
             df = df.rename(columns=column_mapping)
             
-            # Clean data
             df = df.dropna(subset=['Symbol'])
             df['Symbol'] = df['Symbol'].str.strip()
             df['Company Name'] = df['Company Name'].str.strip()
             
-            # Convert to list of dictionaries
             symbols = df.to_dict(orient='records')
             app.logger.info(f"Successfully loaded {len(symbols)} symbols from '{file_path}' using encoding '{enc}'.")
             return symbols
             
         except Exception as e:
             app.logger.error(f"Error loading symbols with encoding '{enc}': {str(e)}")
-            # Try to read and log the first few lines of the file for debugging
             try:
                 with open(file_path, 'r', encoding=enc) as f:
                     first_lines = [next(f) for _ in range(5)]
@@ -109,22 +107,44 @@ def get_stock_price():
 def search_symbols():
     global SYMBOLS
     
-    # Check if SYMBOLS is empty and try to reload it
     if not SYMBOLS:
         SYMBOLS = load_symbols(CSV_FILE_PATH)
         app.logger.info(f"Reloaded {len(SYMBOLS)} symbols on demand")
     
-    query = request.args.get('q', '').strip().lower()
+    query = request.args.get('q', '').strip()
     if not query:
         return jsonify({'error': 'No query provided'}), 400
 
     try:
-        matched_symbols = [
-            symbol for symbol in SYMBOLS
-            if query in symbol['Symbol'].lower() or query in symbol['Company Name'].lower()
-        ]
+        # Calculate similarity scores for symbols and company names
+        matched_symbols = []
+        for symbol in SYMBOLS:
+            symbol_similarity = calculate_similarity(query, symbol['Symbol'])
+            company_similarity = calculate_similarity(query, symbol['Company Name'])
+            
+            # Check for exact matches at the start
+            symbol_starts_with = symbol['Symbol'].lower().startswith(query.lower())
+            company_starts_with = symbol['Company Name'].lower().startswith(query.lower())
+            
+            # Calculate final score (prioritize exact matches and symbols over company names)
+            final_score = max(
+                symbol_similarity * 2 if symbol_starts_with else symbol_similarity,
+                company_similarity if company_starts_with else company_similarity * 0.5
+            )
+            
+            if final_score > 0.1:  # Only include if there's some similarity
+                matched_symbols.append({
+                    **symbol,
+                    'score': final_score
+                })
 
-        top_matches = matched_symbols[:10]
+        # Sort by score and take top 5
+        top_matches = sorted(matched_symbols, key=lambda x: x['score'], reverse=True)[:5]
+        
+        # Remove score from final output
+        for match in top_matches:
+            match.pop('score', None)
+
         if not top_matches:
             app.logger.info(f"Search query '{query}' returned no suggestions.")
             return jsonify({'message': 'No matching symbols found.'}), 404
@@ -135,7 +155,6 @@ def search_symbols():
         app.logger.error(f"Error in search_symbols: {str(e)}")
         return jsonify({'error': 'Internal server error.'}), 500
 
-# Add a health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
