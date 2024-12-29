@@ -43,7 +43,7 @@ def load_symbols(file_path):
 
 def bold_match(text, query):
     """Highlight matching parts of text"""
-    regex = re.compile(f"({query})", re.IGNORECASE)
+    regex = re.compile(f"({re.escape(query)})", re.IGNORECASE)
     return regex.sub(r"<b>\1</b>", text)
 
 @app.route('/api/search', methods=['GET'])
@@ -51,24 +51,26 @@ def search_symbols():
     """Search for symbols and descriptions"""
     global SYMBOLS
 
-    query = request.args.get('q', '').strip().upper()
+    query = request.args.get('q', '').strip()
     if not query:
         return jsonify({'error': 'No query provided'}), 400
 
     try:
-        # Improved matching logic
+        query_upper = query.upper()
+
+        # Matching logic
         exact_matches = [
             symbol for symbol in SYMBOLS
-            if symbol['Symbol'].upper() == query or symbol['Company Name'].upper() == query
+            if symbol['Symbol'].upper() == query_upper or symbol['Company Name'].upper() == query_upper
         ]
         starts_with_matches = [
             symbol for symbol in SYMBOLS
-            if (symbol['Symbol'].upper().startswith(query) or symbol['Company Name'].upper().startswith(query))
+            if (symbol['Symbol'].upper().startswith(query_upper) or symbol['Company Name'].upper().startswith(query_upper))
             and symbol not in exact_matches
         ]
         includes_matches = [
             symbol for symbol in SYMBOLS
-            if (query in symbol['Symbol'].upper() or query in symbol['Company Name'].upper())
+            if (query_upper in symbol['Symbol'].upper() or query_upper in symbol['Company Name'].upper())
             and symbol not in exact_matches
             and symbol not in starts_with_matches
         ]
