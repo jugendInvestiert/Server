@@ -12,29 +12,32 @@ CORS(app)  # Enable CORS for all routes
 logging.basicConfig(level=logging.INFO)
 
 # Path to the NYSE Trading Units CSV file
-CSV_FILE_PATH = 'nyse_trading_units.csv'
+CSV_FILE_PATH = os.getenv('CSV_FILE_PATH', 'nyse_trading_units.csv')
 
-# Load symbols data from the CSV file
+# Load symbols data from the CSV file with multiple encoding attempts
 def load_symbols(file_path):
-    try:
-        df = pd.read_csv(file_path)
-        # Rename columns for consistency
-        df.columns = ['Company Name', 'Symbol', 'Txn Code', 'Y/N', 'Tape']
-        # Drop rows where Symbol is NaN
-        df = df.dropna(subset=['Symbol'])
-        # Convert to list of dictionaries
-        symbols = df.to_dict(orient='records')
-        app.logger.info(f"Loaded {len(symbols)} symbols from {file_path}.")
-        return symbols
-    except FileNotFoundError:
-        app.logger.error(f"CSV file '{file_path}' not found.")
-        return []
-    except pd.errors.ParserError as e:
-        app.logger.error(f"ParserError while reading '{file_path}': {str(e)}")
-        return []
-    except Exception as e:
-        app.logger.error(f"Error loading symbols from '{file_path}': {str(e)}")
-        return []
+    encodings_to_try = ['utf-8-sig', 'utf-16', 'latin1']  # Add more encodings if needed
+    for enc in encodings_to_try:
+        try:
+            df = pd.read_csv(file_path, encoding=enc)
+            # Rename columns for consistency
+            df.columns = ['Company Name', 'Symbol', 'Txn Code', 'Y/N', 'Tape']
+            # Drop rows where Symbol is NaN
+            df = df.dropna(subset=['Symbol'])
+            # Convert to list of dictionaries
+            symbols = df.to_dict(orient='records')
+            app.logger.info(f"Loaded {len(symbols)} symbols from '{file_path}' using encoding '{enc}'.")
+            return symbols
+        except UnicodeDecodeError as e:
+            app.logger.warning(f"UnicodeDecodeError with encoding '{enc}': {str(e)}")
+        except pd.errors.ParserError as e:
+            app.logger.error(f"ParserError while reading '{file_path}' with encoding '{enc}': {str(e)}")
+            break  # If parsing fails, no point in trying other encodings
+        except Exception as e:
+            app.logger.error(f"Error loading symbols from '{file_path}' with encoding '{enc}': {str(e)}")
+            break
+    app.logger.error(f"Failed to load symbols from '{file_path}' with attempted encodings.")
+    return []
 
 # Load symbols at startup
 SYMBOLS = load_symbols(CSV_FILE_PATH)
