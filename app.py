@@ -13,18 +13,29 @@ logging.basicConfig(level=logging.INFO)
 
 CSV_FILE_PATH = os.getenv('CSV_FILE_PATH', 'nyse_trading_units.csv')
 
+# Initialize SYMBOLS as a global variable
+SYMBOLS = []
+
 def load_symbols(file_path):
+    """Load symbols from CSV file and return them"""
+    global SYMBOLS  # Declare SYMBOLS as global
+    
     encodings_to_try = ['utf-8', 'utf-8-sig', 'iso-8859-1', 'latin1', 'cp1252']
     for enc in encodings_to_try:
         try:
+            # Try to read the file first to check if it exists and is readable
+            if not os.path.exists(file_path):
+                app.logger.error(f"CSV file not found at path: {file_path}")
+                return []
+                
             # Add specific separator and quoting parameters
             df = pd.read_csv(
                 file_path,
                 encoding=enc,
-                sep='\t',  # Use tab as separator
-                quoting=csv.QUOTE_NONE,  # Use csv.QUOTE_NONE instead of pd.io.common.QUOTE_NONE
-                escapechar='\\',  # Add escape character for handling special characters
-                on_bad_lines='skip'  # Skip problematic lines
+                sep='\t',
+                quoting=csv.QUOTE_NONE,
+                escapechar='\\',
+                on_bad_lines='skip'
             )
             
             # Clean column names by stripping whitespace
@@ -49,16 +60,9 @@ def load_symbols(file_path):
             symbols = df.to_dict(orient='records')
             app.logger.info(f"Successfully loaded {len(symbols)} symbols from '{file_path}' using encoding '{enc}'.")
             return symbols
-        except UnicodeDecodeError as e:
-            app.logger.warning(f"UnicodeDecodeError with encoding '{enc}': {str(e)}")
-        except pd.errors.ParserError as e:
-            app.logger.error(f"ParserError while reading '{file_path}' with encoding '{enc}': {str(e)}")
+            
         except Exception as e:
-            app.logger.error(f"Error loading symbols from '{file_path}' with encoding '{enc}': {str(e)}")
-            
-            # Add more detailed error logging
-            app.logger.error(f"Full error details: {type(e).__name__}: {str(e)}")
-            
+            app.logger.error(f"Error loading symbols with encoding '{enc}': {str(e)}")
             # Try to read and log the first few lines of the file for debugging
             try:
                 with open(file_path, 'r', encoding=enc) as f:
@@ -66,11 +70,18 @@ def load_symbols(file_path):
                 app.logger.error(f"First 5 lines of file:\n{''.join(first_lines)}")
             except Exception as read_error:
                 app.logger.error(f"Could not read file for debugging: {str(read_error)}")
+            continue
     
-    app.logger.error(f"Failed to load symbols from '{file_path}' with attempted encodings.")
+    app.logger.error(f"Failed to load symbols from '{file_path}' with all attempted encodings.")
     return []
 
-# Rest of the code remains the same...
+# Initialize symbols at startup
+@app.before_first_request
+def initialize_symbols():
+    """Initialize symbols before the first request"""
+    global SYMBOLS
+    SYMBOLS = load_symbols(CSV_FILE_PATH)
+    app.logger.info(f"Initialized {len(SYMBOLS)} symbols at startup")
 
 @app.route('/api/stock', methods=['GET'])
 def get_stock_price():
@@ -99,6 +110,13 @@ def get_stock_price():
 
 @app.route('/api/search', methods=['GET'])
 def search_symbols():
+    global SYMBOLS  # Declare SYMBOLS as global
+    
+    # Check if SYMBOLS is empty and try to load it
+    if not SYMBOLS:
+        SYMBOLS = load_symbols(CSV_FILE_PATH)
+        app.logger.info(f"Loaded {len(SYMBOLS)} symbols on demand")
+    
     query = request.args.get('q', '').strip().lower()
     if not query:
         return jsonify({'error': 'No query provided'}), 400
@@ -121,7 +139,6 @@ def search_symbols():
         return jsonify({'error': 'Internal server error.'}), 500
 
 if __name__ == '__main__':
-    if not os.path.exists(CSV_FILE_PATH):
-        app.logger.error(f"CSV file '{CSV_FILE_PATH}' not found.")
-    else:
-        app.run(debug=True)
+    # Initialize symbols at startup when running locally
+    SYMBOLS = load_symbols(CSV_FILE_PATH)
+    app.run(debug=True)
