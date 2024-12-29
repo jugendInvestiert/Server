@@ -4,6 +4,7 @@ import yfinance as yf
 import pandas as pd
 import logging
 import os
+import csv
 
 app = Flask(__name__)
 CORS(app)
@@ -21,7 +22,8 @@ def load_symbols(file_path):
                 file_path,
                 encoding=enc,
                 sep='\t',  # Use tab as separator
-                quoting=pd.io.common.QUOTE_NONE,  # Disable quoting
+                quoting=csv.QUOTE_NONE,  # Use csv.QUOTE_NONE instead of pd.io.common.QUOTE_NONE
+                escapechar='\\',  # Add escape character for handling special characters
                 on_bad_lines='skip'  # Skip problematic lines
             )
             
@@ -53,12 +55,22 @@ def load_symbols(file_path):
             app.logger.error(f"ParserError while reading '{file_path}' with encoding '{enc}': {str(e)}")
         except Exception as e:
             app.logger.error(f"Error loading symbols from '{file_path}' with encoding '{enc}': {str(e)}")
+            
+            # Add more detailed error logging
+            app.logger.error(f"Full error details: {type(e).__name__}: {str(e)}")
+            
+            # Try to read and log the first few lines of the file for debugging
+            try:
+                with open(file_path, 'r', encoding=enc) as f:
+                    first_lines = [next(f) for _ in range(5)]
+                app.logger.error(f"First 5 lines of file:\n{''.join(first_lines)}")
+            except Exception as read_error:
+                app.logger.error(f"Could not read file for debugging: {str(read_error)}")
     
     app.logger.error(f"Failed to load symbols from '{file_path}' with attempted encodings.")
     return []
 
-# Load symbols at startup
-SYMBOLS = load_symbols(CSV_FILE_PATH)
+# Rest of the code remains the same...
 
 @app.route('/api/stock', methods=['GET'])
 def get_stock_price():
