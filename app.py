@@ -18,8 +18,6 @@ SYMBOLS = []
 
 def load_symbols(file_path):
     """Load symbols from CSV file and return them"""
-    global SYMBOLS  # Declare SYMBOLS as global
-    
     encodings_to_try = ['utf-8', 'utf-8-sig', 'iso-8859-1', 'latin1', 'cp1252']
     for enc in encodings_to_try:
         try:
@@ -75,13 +73,12 @@ def load_symbols(file_path):
     app.logger.error(f"Failed to load symbols from '{file_path}' with all attempted encodings.")
     return []
 
-# Initialize symbols at startup
-@app.before_first_request
-def initialize_symbols():
-    """Initialize symbols before the first request"""
-    global SYMBOLS
+# Load symbols immediately
+try:
     SYMBOLS = load_symbols(CSV_FILE_PATH)
-    app.logger.info(f"Initialized {len(SYMBOLS)} symbols at startup")
+    app.logger.info(f"Initially loaded {len(SYMBOLS)} symbols")
+except Exception as e:
+    app.logger.error(f"Failed to load initial symbols: {str(e)}")
 
 @app.route('/api/stock', methods=['GET'])
 def get_stock_price():
@@ -110,12 +107,12 @@ def get_stock_price():
 
 @app.route('/api/search', methods=['GET'])
 def search_symbols():
-    global SYMBOLS  # Declare SYMBOLS as global
+    global SYMBOLS
     
-    # Check if SYMBOLS is empty and try to load it
+    # Check if SYMBOLS is empty and try to reload it
     if not SYMBOLS:
         SYMBOLS = load_symbols(CSV_FILE_PATH)
-        app.logger.info(f"Loaded {len(SYMBOLS)} symbols on demand")
+        app.logger.info(f"Reloaded {len(SYMBOLS)} symbols on demand")
     
     query = request.args.get('q', '').strip().lower()
     if not query:
@@ -138,7 +135,16 @@ def search_symbols():
         app.logger.error(f"Error in search_symbols: {str(e)}")
         return jsonify({'error': 'Internal server error.'}), 500
 
+# Add a health check endpoint
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({
+        'status': 'healthy',
+        'symbols_loaded': len(SYMBOLS)
+    })
+
 if __name__ == '__main__':
-    # Initialize symbols at startup when running locally
-    SYMBOLS = load_symbols(CSV_FILE_PATH)
-    app.run(debug=True)
+    if not os.path.exists(CSV_FILE_PATH):
+        app.logger.error(f"CSV file '{CSV_FILE_PATH}' not found.")
+    else:
+        app.run(debug=True)
