@@ -8,6 +8,7 @@ import re
 from fuzzywuzzy import fuzz
 from unidecode import unidecode
 import numpy as np
+import yfinance as yf
 
 app = Flask(__name__)
 CORS(app)
@@ -162,6 +163,29 @@ def search_symbols():
         app.logger.error(f"Error in search_symbols: {str(e)}")
         return jsonify({'error': 'Internal server error.'}), 500
 
+@app.route('/api/stock', methods=['GET'])
+def get_stock_price():
+    """Fetch stock price using yfinance"""
+    symbol = request.args.get('symbol', '').strip().upper()
+    if not symbol:
+        return jsonify({'error': 'No symbol provided'}), 400
+    
+    try:
+        stock = yf.Ticker(symbol)
+        data = stock.history(period='1d')
+        if data.empty:
+            return jsonify({'error': 'Symbol not found'}), 404
+        latest = data.iloc[-1]
+        return jsonify({
+            'symbol': symbol,
+            'price': round(latest['Close'], 2),
+            'date': latest.name.strftime('%Y-%m-%d'),
+            'time': latest.name.strftime('%H:%M:%S')
+        })
+    except Exception as e:
+        app.logger.error(f"Error fetching stock data for {symbol}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
@@ -174,4 +198,5 @@ if __name__ == '__main__':
     if not SYMBOLS:
         app.logger.error("Failed to load symbols from the CSV file.")
     else:
+        app.logger.info(f"Loaded {len(SYMBOLS)} symbols successfully.")
         app.run(debug=True)
